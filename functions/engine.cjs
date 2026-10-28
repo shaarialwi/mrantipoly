@@ -1,0 +1,28 @@
+const {randomInt}=require('node:crypto');
+const $=id=>document.getElementById(id),colors=['#246a55','#cf9940','#627cad','#be7187','#8f68ac','#ca764e'];
+const names=['Launchpad','Hive 1','Hive 2','Innovation card','Hive 3','Operations fee','Hive 4','Hive 5','Park Commons','Resource Centre','Learning Studio','Innovation card','Event Auditorium','Co-working Hub','Maker Space','Prototype Lab','Demo Day','Green Mobility','Solar Hub','Innovation card','Water Innovation','Digital Lab','AI Studio','Data Centre','Recharge Stop','Startup Residency','Venture Studio','Innovation card','Living Lab','Testbed Zone','Innovation Campus','Ecosystem HQ'];
+const special={0:'start',3:'card',5:'fee',8:'rest',11:'card',16:'bonus',19:'card',24:'rest',27:'card'};
+const tiles=names.map((name,i)=>({name,type:special[i]||'property',price:120+Math.floor(i/4)*40,rent:20+Math.floor(i/4)*8,band:['#b8b66e','#6f9c88','#6b9ea3','#8d85a5'][Math.floor(i/8)]}));
+function initial(players){return {players:players.map(p=>({uid:p.uid,name:p.name,ai:false,cash:1500,pos:0,out:false})),owners:Array(32).fill(-1),levels:Array(32).fill(0),turn:0,round:1,phase:'roll',pending:-1,dice:[1,1],logs:['Welcome to MRANTI Park. Every innovator starts with RM 1,500.'],message:players[0].name+' — your turn.',over:false};}
+function transition(state,uid,action,index){
+ let s=structuredClone(state),timer;const render=()=>{},human=()=>true,setTimeout=()=>0,aiFinish=()=>{},money=n=>'RM '+n.toLocaleString('en-MY');
+ if(s.over)throw Error('This game has finished.');
+ if(s.players[s.turn].uid!==uid)throw Error('It is not your turn.');
+function log(t){s.logs.unshift(t);s.logs=s.logs.slice(0,35)}
+function worth(i){return s.players[i].cash+tiles.reduce((v,t,k)=>v+(s.owners[k]===i?t.price+s.levels[k]*100:0),0)}
+function rent(i){return tiles[i].rent*(1+s.levels[i])}
+function pay(n,to=-1){let p=s.players[s.turn],paid=Math.min(p.cash,n);p.cash-=paid;if(to>=0)s.players[to].cash+=paid;if(p.cash===0){p.out=true;s.owners=s.owners.map((o,i)=>{if(o===s.turn){s.levels[i]=0;return -1}return o});log(p.name+' ran out of funds and left the game.')}}
+function finish(){let active=s.players.filter(p=>!p.out);if(active.length<=1||s.round>20){s.over=true;s.phase='done';let ranking=s.players.map((p,i)=>({name:p.name,value:worth(i),out:p.out})).sort((a,b)=>Number(a.out)-Number(b.out)||b.value-a.value);s.message=ranking[0].name+' wins with '+money(ranking[0].value)+' net worth!';log(s.message);return true}return false}
+function roll(){if(s.over||s.phase!=='roll')return;let p=s.players[s.turn];s.dice=[1+(randomInt(1,7)-1),1+(randomInt(1,7)-1)];let move=s.dice[0]+s.dice[1];if(p.pos+move>=32){p.cash+=200;log(p.name+' passed Launchpad: + RM 200.')}p.pos=(p.pos+move)%32;let i=p.pos,t=tiles[i];s.pending=-1;s.phase='end';s.message=p.name+' landed on '+t.name+'.';log(p.name+' rolled '+move+' → '+t.name+'.');if(t.type==='property'){if(s.owners[i]<0){s.pending=i;s.phase='buy';s.message+=' Available for '+money(t.price)+'.'}else if(s.owners[i]!==s.turn){let owner=s.owners[i],n=rent(i);pay(n,owner);log(p.name+' paid '+money(n)+' usage fee to '+s.players[owner].name+'.');s.message+=' Usage fee '+money(n)+'.'}else{s.message+=' Your own space.'}}else if(t.type==='fee'){pay(100);log(p.name+' paid RM 100 park operations.')}else if(t.type==='bonus'){p.cash+=150;log(p.name+' earned RM 150 at Demo Day.')}else if(t.type==='card'){let events=[['Prototype grant approved',200],['New industry partnership',150],['Innovation showcase award',100],['Equipment maintenance',-100],['Pilot project delay',-80],['Energy savings incentive',120]],e=events[randomInt(0,events.length)];if(e[1]>0)p.cash+=e[1];else pay(-e[1]);s.message=e[0]+': '+(e[1]>0?'+ ':'− ')+money(Math.abs(e[1]))+'.';log(p.name+': '+s.message)}if(finish())return;render();if(!human()||p.out)timer=setTimeout(aiFinish,850)}
+function buy(){let i=s.pending,p=s.players[s.turn];if(s.over||s.phase!=='buy'||i<0||s.owners[i]>=0||p.cash<=tiles[i].price)return;p.cash-=tiles[i].price;s.owners[i]=s.turn;s.phase='end';s.pending=-1;s.message=p.name+' invested in '+tiles[i].name+'.';log(s.message);render()}
+function upgrade(i){if(s.over||!human()||s.owners[i]!==s.turn||s.players[s.turn].cash<=100||s.levels[i]>=3)return;s.players[s.turn].cash-=100;s.levels[i]++;log(s.players[s.turn].name+' upgraded '+tiles[i].name+' to level '+s.levels[i]+'.');render()}
+function next(){if(s.over)return;do{s.turn=(s.turn+1)%s.players.length;if(s.turn===0)s.round++}while(s.players[s.turn].out&&s.round<=20);if(finish())return;s.phase='roll';s.pending=-1;s.message=human()?s.players[s.turn].name+' — your turn. Roll to explore.':s.players[s.turn].name+' is exploring the park…';render();if(!human())timer=setTimeout(roll,900)}
+ if(action==='roll'){if(s.phase!=='roll')throw Error('Dice already rolled.');roll();if(!s.over&&s.players[s.turn].out)next();}
+ else if(action==='buy'){if(s.phase!=='buy'||s.pending<0||s.players[s.turn].cash<=tiles[s.pending].price)throw Error('This investment is unavailable.');buy();}
+ else if(action==='end'){if(!['buy','end'].includes(s.phase))throw Error('Roll before ending your turn.');next();}
+ else if(action==='upgrade'){if(!Number.isInteger(index)||index<0||index>=32||s.owners[index]!==s.turn||s.levels[index]>=3||s.players[s.turn].cash<=100)throw Error('This upgrade is unavailable.');upgrade(index);}
+ else if(action==='skip'){log(s.players[s.turn].name+' was skipped by the host after the turn timeout.');next();}
+ else throw Error('Unknown action.');
+ return s;
+}
+module.exports={initial,transition};
