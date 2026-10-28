@@ -1,3 +1,4 @@
+import {setVoiceRoom} from './voice.js';
 import {initial,transition} from './game-engine.js';
 import {firebaseConfig} from './firebase-config.js';
 const el=id=>document.getElementById(id);let auth,db,fns,user=null,room=null,code='',unsub=null,busy=false,connected=navigator.onLine,liveReady=false;
@@ -7,8 +8,8 @@ const allowedAccount=u=>!!u?.emailVerified && /^[^@\s]+@mranti\.my$/i.test(u.ema
 const notice=t=>{el('connection').textContent=t};
 function controls(){document.querySelectorAll('#online-panel button').forEach(b=>b.disabled=busy||!connected);if(room){el('start-room').disabled=busy||!connected||room.host!==user?.uid||room.members.length<2||room.status!=='waiting';el('skip-turn').disabled=busy||!connected||room.host!==user?.uid||room.status!=='playing';}if(room?.state){document.querySelectorAll('#roll,#buy,#end').forEach(b=>b.disabled=false);window.paintOnline(room.state,user?.uid);if(busy||!connected||!liveReady)window.lockGame();}}
 async function task(fn){if(busy)return;busy=true;message('');controls();try{await fn()}catch(e){const fixes={'permission-denied':'Access denied. Confirm the Spark Firestore rules are published in premium-hybrid-471106-a7 and sign in with your MRANTI Google account.','resource-exhausted':'The Firebase usage limit was reached. Please try again after the quota resets.','unavailable':'Firestore is unavailable. Check your connection and confirm the default database exists.'};if(fixes[e.code]){message(fixes[e.code]);return;}const generic=['auth/invalid-credential','auth/user-not-found','auth/wrong-password'];message(generic.includes(e.code)?'Unable to sign in. Check your email and password.':e.message||'Unable to connect. Please try again.');}finally{busy=false;controls()}}
-function stopRoom(){chatUnsub?.();chatUnsub=null;show("room-chat",false);el("chat-messages").replaceChildren();unsub?.();unsub=null;room=null;code='';liveReady=false;show('game-main',false);show('lobby',false);show('online-panel',true);show('room-panel',allowedAccount(user));}
-function openRoom(c){unsub?.();chatUnsub?.();chatUnsub=null;code=c;liveReady=false;try{localStorage.setItem('mranti-room-'+user.uid,c)}catch{};show('room-panel',false);show('lobby',true);notice('Connecting to room…');unsub=fns.onSnapshot(fns.doc(db,'sparkRooms',c),{includeMetadataChanges:true},snap=>{if(!snap.exists()){message('This room no longer exists.');return}room=snap.data();if(!chatUnsub)watchChat(c);el('lobby-status').textContent=room.status==='waiting'?room.members.length+'/4 players joined. '+(room.members.length<2?'Waiting for at least one more player.':'You can wait for more players. Only the host starts the game.'):'Game started — new players cannot join.';connected=navigator.onLine;liveReady=connected&&!snap.metadata.fromCache&&!snap.metadata.hasPendingWrites;notice(liveReady?'Live sync connected':'Reconnecting… actions are paused.');el('room-title').textContent='ROOM '+c;el('room-members').replaceChildren(...room.members.map((m,i)=>{const d=document.createElement('div');d.textContent=(i+1)+'. '+m.name+(m.uid===room.host?' · Host':'')+(m.uid===user?.uid?' · You':'');return d}));show('start-room',room.status==='waiting');show('return-game',!!room.state);show('skip-turn',!!room.state&&room.host===user?.uid&&room.status==='playing');if(room.state){show('game-main',true);if(!window.accountOpen)show('online-panel',false)}controls();},error=>{connected=navigator.onLine;liveReady=false;message('Room connection failed: '+error.message+' Check the Spark Firestore rules, then leave this view and rejoin.');show('online-panel',true);controls()});}
+function stopRoom(){setVoiceRoom(null);lastTurn=null;window.speechSynthesis?.cancel();chatUnsub?.();chatUnsub=null;show("room-chat",false);el("chat-messages").replaceChildren();unsub?.();unsub=null;room=null;code='';liveReady=false;show('game-main',false);show('lobby',false);show('online-panel',true);show('room-panel',allowedAccount(user));}
+function openRoom(c){if(c!==code)lastTurn=null;unsub?.();chatUnsub?.();chatUnsub=null;code=c;liveReady=false;try{localStorage.setItem('mranti-room-'+user.uid,c)}catch{};show('room-panel',false);show('lobby',true);notice('Connecting to room…');unsub=fns.onSnapshot(fns.doc(db,'sparkRooms',c),{includeMetadataChanges:true},snap=>{if(!snap.exists()){message('This room no longer exists.');return}room=snap.data();setVoiceRoom({code:c,uid:user.uid,db,f:fns});if(!snap.metadata.fromCache&&!snap.metadata.hasPendingWrites)announceTurn(room);if(!chatUnsub)watchChat(c);el('lobby-status').textContent=room.status==='waiting'?room.members.length+'/4 players joined. '+(room.members.length<2?'Waiting for at least one more player.':'You can wait for more players. Only the host starts the game.'):'Game started — new players cannot join.';connected=navigator.onLine;liveReady=connected&&!snap.metadata.fromCache&&!snap.metadata.hasPendingWrites;notice(liveReady?'Live sync connected':'Reconnecting… actions are paused.');el('room-title').textContent='ROOM '+c;el('room-members').replaceChildren(...room.members.map((m,i)=>{const d=document.createElement('div');d.textContent=(i+1)+'. '+m.name+(m.uid===room.host?' · Host':'')+(m.uid===user?.uid?' · You':'');return d}));show('start-room',room.status==='waiting');show('return-game',!!room.state);show('skip-turn',!!room.state&&room.host===user?.uid&&room.status==='playing');if(room.state){show('game-main',true);if(!window.accountOpen)show('online-panel',false)}controls();},error=>{connected=navigator.onLine;liveReady=false;message('Room connection failed: '+error.message+' Check the Spark Firestore rules, then leave this view and rejoin.');show('online-panel',true);controls()});}
 window.onlineAction=(action,index)=>task(async()=>{if(!room||!connected||!liveReady)throw Error('Wait for the room to reconnect.');const revision=room.revision;await act({code,action,index:index??null,revision});});
 el('reset').onclick=()=>{window.accountOpen=true;show('online-panel',true);el('online-panel').scrollIntoView({behavior:'smooth'})};
 window.addEventListener('offline',()=>{connected=false;notice('You are offline. Your seat is saved; reconnect to continue.');controls()});window.addEventListener('online',()=>{connected=true;if(code)openRoom(code);else controls()});
@@ -82,4 +83,27 @@ el('chat-form').onsubmit=async e=>{
  try{await fns.addDoc(fns.collection(db,'sparkRooms',c,'messages'),{uid:user.uid,name:member.name,text,createdAt:fns.serverTimestamp()});if(code===c){el('chat-input').value='';el('chat-status').textContent='Message sent. Only room members can read it.';}}
  catch(e){el('chat-status').textContent='Message could not be sent. Check your connection and the updated chat rules.';}
  finally{chatBusy=false;el('chat-send').disabled=false;}
+};
+
+// Device speech synthesis: no paid API or audio download required.
+let voiceEnabled=false,lastTurn=null;
+function speakCue(text){
+ if(!voiceEnabled||!('speechSynthesis' in window))return;
+ const utterance=new SpeechSynthesisUtterance(text);utterance.lang='en-US';utterance.rate=0.95;
+ const voices=speechSynthesis.getVoices();const voice=voices.find(v=>v.lang.startsWith('en')&&v.localService)||voices.find(v=>v.lang.startsWith('en'));
+ if(voice)utterance.voice=voice;speechSynthesis.speak(utterance);
+}
+function announceTurn(r){
+ if(!r.state)return;
+ const s=r.state,key=code+':'+s.round+':'+s.turn,mine=!s.over&&s.players[s.turn].uid===user?.uid;
+ const changed=lastTurn&&(lastTurn.key!==key||lastTurn.over!==s.over);
+ if(changed&&lastTurn.mine)speakCue('End turn');
+ if(mine&&(!lastTurn||changed))speakCue('Your turn');
+ lastTurn={key,mine,over:s.over};
+}
+el('turn-sound').onclick=()=>{
+ if(!('speechSynthesis' in window)){el('turn-sound').textContent='Voice unavailable in this browser';return;}
+ voiceEnabled=!voiceEnabled;speechSynthesis.cancel();
+ el('turn-sound').textContent=voiceEnabled?'Voice cues: on':'Enable voice cues';el('turn-sound').setAttribute('aria-pressed',String(voiceEnabled));
+ if(voiceEnabled)speakCue(lastTurn?.mine?'Your turn':'Voice cues enabled');
 };
