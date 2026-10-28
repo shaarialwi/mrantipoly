@@ -1,101 +1,89 @@
-# MRANTI Park Online — Google Workspace edition
+# MRANTI Park Online — Firebase Spark edition
 
-Prepared for:
-- Website: https://monopoly.shaarialwi.com/index.html
-- Repository: https://github.com/shaarialwi/mrantipoly
-- Firebase project: premium-hybrid-471106-a7
-- Functions region: asia-southeast1 (Singapore)
+Website: https://monopoly.shaarialwi.com/index.html
+GitHub: https://github.com/shaarialwi/mrantipoly
+Firebase project: premium-hybrid-471106-a7
 
-This package is configured with your supplied Firebase web app settings. It has NOT been uploaded to your repository or deployed to Firebase. Live Google sign-in and multi-laptop play require the steps below.
+This version uses Google Authentication and Cloud Firestore directly. NO Cloud Functions, Firebase CLI installation, backend deployment or billing upgrade is needed to run it. The Firebase web configuration and custom domain are already filled in. This download does not change your live Firebase settings or GitHub files.
 
-## 1. Authorise the game website
+## Step 1 — Create the database (if needed)
 
-Firebase Console → Authentication → Settings → Authorized domains → Add domain:
+In Firebase Console select project ID premium-hybrid-471106-a7. Go to Databases & Storage → Firestore Database → Create database.
 
-    monopoly.shaarialwi.com
+- Select Standard edition.
+- Database ID: `(default)`.
+- Choose Singapore (`asia-southeast1`) if available.
+- Start in Production mode.
 
-Enter only the hostname, without https:// or /index.html. If the game is also opened directly through GitHub Pages, add shaarialwi.github.io as well. Do not remove Firebase's existing domains.
+If a default database already exists, use it; do not delete or recreate it. This game uses a new collection, `sparkRooms`, so it does not reuse old Cloud Functions room records.
 
-Google must be Enabled under Authentication → Sign-in method. If prompted inside Google provider settings, select a project support email and save. Email/Password is not needed by this game. Do not disable providers used by other applications in this shared project.
+## Step 2 — Publish the Spark access rules (required)
 
-## 2. Create or inspect the default Firestore database
+1. Open Firestore Database → Rules.
+2. Open `firestore.rules` from this download in a text editor.
+3. If this database is only for the game, replace the rules editor contents with that complete file.
+4. Click Publish.
 
-In Firebase, open Databases & Storage → Firestore Database.
+If the database serves another app, preserve that app's rules and merge this file's helper functions and `/sparkRooms/{code}` match into the existing `match /databases/{database}/documents` block. Do not overwrite the rules of other applications. A broad existing wildcard allow can override restrictions on sparkRooms: rules are additive, so review overlapping matches. Do not use public test-mode rules or `allow read, write: if true`.
 
-If no database exists, create a Standard edition database with ID `(default)`, select Singapore (`asia-southeast1`) if available, and start in Production mode.
+The Spark rules are DIFFERENT from the previous Cloud Functions edition. Keeping the old rules will block creating rooms.
 
-If a database already exists, keep it. Do not delete data or recreate it. Check whether it serves another application before changing rules. The supplied rules only allow this game's room access and deny all other client access. In a shared database, merge the `/rooms/{code}` match into the existing rules instead of replacing other applications' rules. Review broad existing wildcard allows: Firestore grants access if ANY matching allow succeeds, so a permissive catch-all can defeat the room restrictions.
+## Step 3 — Confirm Google sign-in
 
-The backend writes `rooms` and `roomLimits`. Check for name conflicts with existing collections before deploying.
+Authentication → Sign-in method: Google Enabled.
+Authentication → Settings → Authorized domains: add `monopoly.shaarialwi.com`.
+If visiting the github.io URL directly, also add `shaarialwi.github.io`.
 
-## 3. Deploy backend and rules
+Only verified @mranti.my Google accounts can use the database. The account picker domain hint is not the security control; the rules enforce the domain, verified-email flag and Google sign-in provider. Other Google accounts may still get an Authentication record before the app signs them out, but cannot access game data.
 
-On your Mac, unzip the package. Open Terminal in the extracted folder containing firebase.json. Install Node.js 22 if necessary.
+## Step 4 — Update your GitHub website
 
-```bash
-npm install -g firebase-tools
-firebase login
-npm --prefix functions install
-node tests/identity.test.cjs
-node tests/engine.test.cjs
-node tests/backend.test.cjs
-firebase deploy --project premium-hybrid-471106-a7 --only firestore:rules,functions
-```
+Upload these FIVE files from the extracted ZIP to the same folder as the site's existing index.html, replacing older copies:
 
-Only deploy the rules after reviewing step 2 for existing applications. Four functions are deployed: createRoom, joinRoom, startRoom and gameAction. The Firebase project already has Blaze billing according to your setup screen. Usage charges can apply; budget alerts are notifications, not spending caps. No additional billing configuration is included in this package.
+1. index.html
+2. online.js
+3. game-engine.js — NEW; must be uploaded
+4. firebase-config.js
+5. CNAME — preserves monopoly.shaarialwi.com
 
-If Firebase deploy asks to enable required Google Cloud APIs or accept terms, review the request in your own account.
+Optionally upload .nojekyll. Commit the changes and wait for GitHub Pages to publish. Keep the current Pages branch/folder and custom domain settings. The ZIP itself does not run as a website. Backend folders from earlier versions are not used; do not deploy them for Spark.
 
-## 4. Update GitHub
+Refresh https://monopoly.shaarialwi.com/index.html. The header should say SPARK EDITION. If it does not, hard-refresh after the GitHub Pages deployment has finished.
 
-Unzip MRANTI-Park-Online.zip. In shaarialwi/mrantipoly, upload these extracted files to the SAME folder that currently supplies the live index.html:
+## Step 5 — Play
 
-- index.html
-- online.js
-- firebase-config.js
-- CNAME (contains monopoly.shaarialwi.com; preserve your existing custom domain)
-- .nojekyll (optional)
+- Sign in using your MRANTI Google account.
+- Click Create a room; leave the join-code field blank when creating.
+- Share the generated 20-character room code with colleagues. Do not invent a code such as shaari1234.
+- Each colleague opens the website on their own laptop, signs in, and pastes that code into Join / rejoin.
+- The host starts with 2–4 players. Online rooms have human players only.
+- Only the active player submits moves. The host can skip a stalled turn after two minutes.
+- Refresh or reconnect, then rejoin with the same Google account and code to keep your seat.
+- Leaving the view keeps your seat. Start a new room for a different player list or rematch.
 
-Replace the corresponding game files and commit. Do not upload the ZIP as the website. Do not upload node_modules or private credentials. Backend files do not run on GitHub Pages; they are deployed in step 3. You may store backend source in the repository, but it is not needed to serve the frontend.
+Old 10-character room codes from the Functions edition do not work in this version.
 
-Keep the repository's existing GitHub Pages publishing configuration and custom domain. Wait for its Pages deployment to finish, then open https://monopoly.shaarialwi.com/index.html and refresh.
+## Spark limits and casual-play scope
 
-## 5. Test Google sign-in
+Live updates consume Firestore reads; writes occur on room joins, starts and player actions. Quotas are shared with other apps in this project. Usage may stop when a Spark quota is reached. Check the Firebase Usage dashboard; no automatic upgrade is performed.
 
-Click Sign in with Google and select your @mranti.my account. No separate game password or verification email is needed when Google supplies a verified account.
+Dice and game calculations run in the active player's browser. Rules enforce MRANTI identity, host identity, membership, lobby capacity, current-player write access, turn timestamps, version increments and basic data shape. They do not reproduce every Monopoly calculation or prove fair dice. A technically skilled participant could manipulate game results during their own turn. Use this version for casual colleague play, not prizes or competitive rankings.
 
-Create a room, share its code, and have another colleague sign in on a different laptop. The host can start with 2–6 players. Each player controls their own turn. Rejoin with the same account and code after a disconnect. Rooms expire after seven days; expiry blocks use but does not delete records automatically. Optionally configure Firestore TTL on rooms.expiresAt for eventual deletion. Account deletion and roomLimits cleanup remain administrative tasks.
+A verified MRANTI user who knows an exact waiting-room code can view that lobby and join. Once started, only members can read the board. Room listing is denied. Store only display names, account IDs and game state; emails remain in Authentication. No player password is stored by the game.
 
-Google may still authenticate a non-MRANTI user and create a Firebase Authentication account record. This game immediately signs that user out and denies game functions and room reads. This package restricts GAME ACCESS; it does not configure an Identity Platform blocking function to prevent all non-MRANTI Firebase account creation across the project.
-
-The hd: mranti.my account-picker hint is a convenience only. Enforcement requires the deployed backend and Firestore rules: verified email, exact mranti.my domain, Google provider, and room membership. Server-side dice, transaction revisions and turn checks prevent clients from changing balances or playing out of turn.
-
-If the organisation blocks the OAuth app, ask your Google Workspace administrator to review its access policy. Do not bypass organisational restrictions.
-
-## Verification status
-
-Local tests cover 100 games at 2–6 players, room capacity, rejoining, host controls, stale revision rejection, invalid turns, and domain/provider/email verification checks. Browser syntax and HTML structure checks pass. Live Firebase rules, email identity tokens, OAuth popups, multi-browser syncing and visual layout have NOT been verified against your project.
-
-After deployment, test:
-- Two MRANTI accounts can sign in and see the same room and board.
-- A Gmail account is signed out and cannot read rooms or call game functions.
-- An authenticated MRANTI account outside the room cannot read it.
-- Browser direct writes to rooms are denied.
-- Inactive users cannot roll, buy or upgrade.
-- Refresh/rejoin preserves a seat; stale duplicate actions are rejected.
-- Host can skip a stalled turn only after two minutes.
+Rooms expire after seven days. Expired records are inaccessible but are NOT automatically deleted; delete old sparkRooms documents manually through the console if storage grows. Do not enable paid TTL features just for this Spark setup. Avoid deleting other project resources. This package does not downgrade or unlink billing from your shared Google Cloud project; if it is currently Spark, keep it there.
 
 ## Troubleshooting
 
-- auth/unauthorized-domain: add monopoly.shaarialwi.com in Authentication → Settings → Authorized domains.
-- auth/popup-blocked: allow the sign-in popup for your game and click again.
-- Function not found/internal: confirm all four functions deployed in asia-southeast1 in premium-hybrid-471106-a7.
-- Permission denied: deploy reviewed rules and backend; use a verified MRANTI Google account, then join via room code.
-- Old email/password form: replace index.html and online.js, wait for the GitHub Pages build, then hard-refresh.
-- Incorrect Firebase configuration: use the exact supplied web configuration; never substitute a service-account key.
+- `internal [0]`: the browser may still have the old Functions version. Replace all five files, verify SPARK EDITION, and hard-refresh.
+- `permission-denied`: publish this package's Spark rules in the correct project/default database; sign in with a verified MRANTI Google account. Old rules block browser writes.
+- `unavailable`: check the internet connection and default Firestore database setup.
+- `resource-exhausted`: check Spark's usage quota and wait for the relevant quota reset.
+- `auth/unauthorized-domain`: add monopoly.shaarialwi.com to Firebase Authorized domains.
+- Board changed: another action or tab updated the room; wait for the latest view and retry.
+- Cannot join an in-progress game: new players can join only while waiting; existing members can rejoin.
+- Rules publish error: send the exact line and error; do not loosen the rules to make it work.
 
-## Sources
+## Verification
 
-https://firebase.google.com/docs/auth/web/google-signin
-https://firebase.google.com/docs/firestore/security/rules-conditions
-https://firebase.google.com/docs/functions/callable
+See TEST-RESULTS.md for local verification and the remaining live-project checks.

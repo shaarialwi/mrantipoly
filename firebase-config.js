@@ -8,4 +8,4 @@ export const firebaseConfig = {
   "appId": "1:440472522985:web:b45896a49c5d8652c6e078",
   "measurementId": "G-8DQC80BE6Y"
 };
-export const functionsRegion = "asia-southeast1";
+

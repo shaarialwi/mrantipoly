@@ -1,15 +1,115 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    match /rooms/{code} {
-      allow get: if request.auth != null
+    function mranti() {
+      return request.auth != null
         && request.auth.token.email_verified == true
-        && request.auth.token.firebase.sign_in_provider == "google.com"
-        && request.auth.token.email.lower().matches("^[^@]+@mranti[.]my$")
-        && request.auth.uid in resource.data.uids
-        && request.time < resource.data.expiresAt;
-      allow list, create, update, delete: if false;
+        && request.auth.token.firebase.sign_in_provider == 'google.com'
+        && request.auth.token.email.lower().matches('^[^@]+@mranti[.]my$');
     }
+    function member(m, uid) {
+      return m is map && m.keys().hasOnly(['uid','name'])
+        && m.uid == uid && m.name is string && m.name.size() > 0 && m.name.size() <= 20;
+    }
+    function player(p,m,uid) {
+      return p.uid == uid && p.name == m.name
+;
+    }
+    function slot(d,i) {
+      return i >= d.uids.size() || player(d.state.players[i],d.members[i],d.uids[i]);
+    }
+    function stateShape(d) {
+      let s=d.state;
+      return d.state is map
+        && s.keys().hasOnly(['players','owners','levels','turn','round','phase','pending','dice','logs','message','over'])
+        && s.players is list && s.players.size() == d.uids.size()
+        && s.owners is list && s.owners.size() == 32
+        && s.levels is list && s.levels.size() == 32
+        && s.turn is int && s.turn >= 0 && s.turn < d.uids.size()
+        && s.round is int && s.round >= 1 && s.round <= 21
+        && s.phase in ['roll','buy','end','done']
+        && s.pending is int && s.pending >= -1 && s.pending < 32
+        && s.over is bool && s.logs is list && s.logs.size() <= 35
+        && s.message is string && s.message.size() <= 500
+        && s.dice is list && s.dice.size() == 2
+        && s.dice[0] is int && s.dice[0] >= 1 && s.dice[0] <= 6
+        && s.dice[1] is int && s.dice[1] >= 1 && s.dice[1] <= 6
+        && slot(d,0) && slot(d,1) && slot(d,2) && slot(d,3);
+    }
+    function startingSlot(d,i) {
+      let s=d.state;
+      return i >= d.uids.size() || (s.players[i].cash == 1500 && s.players[i].pos == 0 && s.players[i].out == false);
+    }
+    function validStart(d) {
+      let s=d.state;
+      return s.turn == 0 && s.round == 1 && s.phase == 'roll'
+        && s.pending == -1 && s.over == false
+        && s.owners.hasOnly([-1]) && s.levels.hasOnly([0])
+        && startingSlot(d,0) && startingSlot(d,1) && startingSlot(d,2)
+        && startingSlot(d,3);
+    }
+    match /sparkRooms/{code} {
+      // A verified MRANTI colleague with the exact code may read a waiting lobby to join.
+      // Existing game boards are readable only by their members. Listing rooms is forbidden.
+      allow get: if mranti() && code.matches('^[A-F0-9]{20}$')
+        && (!exists(/databases/$(database)/documents/sparkRooms/$(code))
+            || (request.time < resource.data.expiresAt
+                && (resource.data.status == 'waiting' || request.auth.uid in resource.data.uids)));
+      allow list, delete: if false;
+      allow create: if mranti() && code.matches('^[A-F0-9]{20}$')
+        && request.resource.data.keys().hasOnly(['host','uids','members','status','state','revision','createdAt','updatedAt','turnStartedAt','expiresAt','lastAction'])
+        && request.resource.data.host == request.auth.uid
+        && request.resource.data.uids == [request.auth.uid]
+        && request.resource.data.members.size() == 1 && member(request.resource.data.members[0],request.auth.uid)
+        && request.resource.data.status == 'waiting' && request.resource.data.state == null
+        && request.resource.data.revision == 0 && request.resource.data.lastAction == 'create'
+        && request.resource.data.createdAt == request.time && request.resource.data.updatedAt == request.time
+        && request.resource.data.turnStartedAt == request.time
+        && request.resource.data.expiresAt > request.time
+        && request.resource.data.expiresAt <= request.time + duration.value(8,'d');
+      allow update: if mranti() && request.time < resource.data.expiresAt
+        && request.resource.data.host == resource.data.host
+        && request.resource.data.createdAt == resource.data.createdAt
+        && request.resource.data.expiresAt == resource.data.expiresAt
+        && request.resource.data.revision == resource.data.revision + 1
+        && request.resource.data.updatedAt == request.time
+        && (resource.data.status == 'waiting' ? (request.resource.data.lastAction == 'join' ? join() : start()) : play());
+      function join() {
+        let a=resource.data; let b=request.resource.data;
+        return a.status == 'waiting' && b.lastAction == 'join'
+          && !(request.auth.uid in a.uids) && a.uids.size() < 4
+          && b.diff(a).affectedKeys().hasOnly(['uids','members','revision','updatedAt','lastAction'])
+          && b.uids == a.uids.concat([request.auth.uid])
+          && b.members.size() == a.members.size()+1
+          && b.members[0:a.members.size()] == a.members
+          && member(b.members[a.members.size()],request.auth.uid);
+      }
+      function start() {
+        let a=resource.data; let b=request.resource.data;
+        return a.status == 'waiting' && b.status == 'playing' && b.lastAction == 'start'
+          && request.auth.uid == a.host && a.uids.size() >= 2 && a.uids.size() <= 4
+          && b.diff(a).affectedKeys().hasOnly(['status','state','revision','updatedAt','turnStartedAt','lastAction'])
+          && b.turnStartedAt == request.time && stateShape(b) && validStart(b);
+      }
+      function play() {
+        let a=resource.data; let b=request.resource.data;
+        let changedTurn=b.state.turn != a.state.turn || b.state.round != a.state.round;
+        return a.status == 'playing' && a.state.over == false
+          && b.diff(a).affectedKeys().hasOnly(['state','status','revision','updatedAt','turnStartedAt','lastAction'])
+          && request.auth.uid in a.uids && stateShape(b)
+          && ((b.status == 'finished' && b.state.over == true && b.state.phase == 'done')
+              || (b.status == 'playing' && b.state.over == false && b.state.phase != 'done'))
+          && (changedTurn ? b.turnStartedAt == request.time : b.turnStartedAt == a.turnStartedAt)
+          && ((request.auth.uid == a.uids[a.state.turn]
+               && ((b.lastAction == 'roll' && a.state.phase == 'roll')
+                   || (b.lastAction == 'buy' && a.state.phase == 'buy')
+                   || (b.lastAction == 'end' && a.state.phase in ['buy','end'])
+                   || b.lastAction == 'upgrade'))
+              || (request.auth.uid == a.host && b.lastAction == 'skip' && changedTurn
+                  && request.time >= a.turnStartedAt + duration.value(120,'s')));
+      }
+    }
+    // Keep other existing application rules if this project is shared.
     match /{document=**} { allow read, write: if false; }
   }
 }
